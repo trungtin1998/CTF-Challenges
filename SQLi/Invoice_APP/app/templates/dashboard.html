@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin - Invoices</title>
+    <link rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+</head>
+<body class="bg-light">
+<div class="container py-4">
+    <h2 class="mb-4">Invoice Management</h2>
+    <!-- Countdown time to clear database -->
+    <div id="cleanupContainer" class="mb-3">
+      <span class="me-2">Next database cleanup:</span>
+      <span id="cleanupTimer" class="badge bg-info text-dark">
+        Loading...
+      </span>
+      <small id="cleanupAt" class="text-muted ms-2"></small>
+    </div>
+    <form method="post" class="mb-3 d-flex" action="/admin">
+        <input type="text" name="search" value="{{ search }}" class="form-control me-2"
+               placeholder="INV-00000000000001 INV-00000000000002 INV-00000000000003">
+        <button class="btn btn-primary">Search</button>
+    </form>
+    {% if result_count %}
+        <p class="text-muted mb-3">
+            Found <strong>{{ result_count }}</strong> result{{ 's' if result_count != 1 else '' }}.
+        </p>
+    {% endif %}
+    <table class="table table-bordered table-hover bg-white">
+        <thead class="table-secondary">
+            <tr>
+                <th>ID</th>
+                <th>Invoice Number</th>
+                <th>Customer</th>
+                <th>Total ($)</th>
+                <th>Created</th>
+            </tr>
+        </thead>
+        <tbody>
+      {% if error %}
+          <div class="alert alert-danger" role="alert"><b>Query Error:</b> {{ error }}</div>
+      {% endif %}
+        {% if invoices %}
+            {% for inv in invoices %}
+            <tr>
+                <td>{{ inv.id }}</td>
+                <td>{{ inv.invoice_number }}</td>
+                <td>{{ inv.customer_name }}</td>
+                <td>{{ "%.2f"|format(inv.total_amount) }}</td>
+                <td>{{ inv.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+            </tr>
+            {% endfor %}
+        {% else %}
+            <tr><td colspan="5" class="text-center">No invoices found.</td></tr>
+        {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<button id="showSourceBtn"
+        style="display:none; position: fixed; bottom: 20px; right: 20px;
+               background-color: #007bff; color: white;
+               border: none; padding: 8px 14px;
+               border-radius: 6px; cursor: pointer;">
+  Show Source
+</button>
+<div id="sourceBox"
+     style="display:none; position: fixed; bottom: 70px; right: 20px;
+            width: 50%; height: 50%; overflow: auto;
+            background: #1e1e1e; color: #dcdcdc;
+            font-family: monospace; font-size: 13px;
+            border-radius: 8px; padding: 10px; white-space: pre;">
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = document.getElementById("showSourceBtn");
+  const box = document.getElementById("sourceBox");
+
+  btn.addEventListener("click", async () => {
+    if (box.style.display === "block") {
+      box.style.display = "none";
+      btn.textContent = "Show Source";
+      return;
+    }
+
+    const res = await fetch("/show_source", {
+      headers: {
+        "X-API": "T6Cuqo4xfpsZqvhRdRrR"
+      }
+  });
+    const data = await res.json();
+
+    if (data.source) {
+      box.textContent = data.source;
+      box.style.display = "block";
+      btn.textContent = "Hide Source";
+    } else {
+      box.textContent = "Error: " + data.error;
+      box.style.display = "block";
+    }
+  });
+});
+
+
+(function () {
+  let secondsLeft = null;
+  let serverTimestamp = null;
+  let tickId = null;
+
+  async function syncFromServer() {
+    try {
+      const resp = await fetch("/next_cleanup",{
+      headers: {
+        "X-API": "T6Cuqo4xfpsZqvhRdRrR"
+      },
+      cache: "no-store"
+  });
+      if (!resp.ok) {
+        secondsLeft = null;
+        serverTimestamp = null;
+        updateDisplay();
+        return;
+      }
+      const data = await resp.json();
+      if (data.status && data.status === "not started yet") {
+        secondsLeft = null;
+        serverTimestamp = null;
+        updateDisplay();
+        return;
+      }
+      if (typeof data.seconds_left === "number") {
+        secondsLeft = data.seconds_left;
+        serverTimestamp = Date.now();
+        const atEl = document.getElementById("cleanupAt");
+        if (data.next_cleanup_at) {
+          atEl.textContent = "at " + data.next_cleanup_at;
+        } else {
+          atEl.textContent = "";
+        }
+        updateDisplay();
+      } else {
+        secondsLeft = null;
+        serverTimestamp = null;
+        updateDisplay();
+      }
+    } catch (err) {
+      console.error("Failed to fetch /next_cleanup:", err);
+      secondsLeft = null;
+      serverTimestamp = null;
+      updateDisplay();
+    }
+  }
+
+  function updateDisplay() {
+    const el = document.getElementById("cleanupTimer");
+    if (!el) return;
+
+    if (secondsLeft === null) {
+      el.textContent = "Not scheduled";
+      el.className = "badge bg-secondary text-white";
+      return;
+    }
+    const elapsedMs = serverTimestamp ? Math.floor((Date.now() - serverTimestamp) / 1000) : 0;
+    let s = secondsLeft - elapsedMs;
+    if (s < 0) s = 0;
+
+    const mins = Math.floor(s / 60);
+    const secs = s % 60;
+    el.textContent = `${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+    if (s === 0) {
+      el.className = "badge bg-success text-white";
+    } else if (s <= 60) {
+      el.className = "badge bg-warning text-dark";
+    } else {
+      el.className = "badge bg-info text-dark";
+    }
+  }
+
+  function startTick() {
+    if (tickId) return;
+    tickId = setInterval(updateDisplay, 1000);
+  }
+
+  (function init() {
+    syncFromServer();
+    setInterval(syncFromServer, 10000);
+    startTick();
+  })();
+})();
+</script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!--flag at /flag.txt-->
+</body>
+</html>

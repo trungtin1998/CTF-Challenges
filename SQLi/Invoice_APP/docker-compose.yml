@@ -1,0 +1,49 @@
+version: "3.9"
+
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "sQrcHP!D5x"
+    ports:
+      - "1433:1433"
+    volumes:
+      - ./mssql/init.sql:/init.sql:ro
+      - ./mssql/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - ./mssql/flag.txt:/flag.txt:ro
+    command: ["/bin/bash", "/docker-entrypoint-initdb.d/init.sh"]
+    healthcheck:
+      test: ["CMD", "/opt/mssql-tools18/bin/sqlcmd", "-S", "localhost", "-U", "sa", "-P", "sQrcHP!D5x", "-Q", "SELECT 1", "-C"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  flaskapp:
+    build: ./app
+    container_name: flaskapp
+    environment:
+      MSSQL_HOST: mssql
+      MSSQL_USER: sa
+      MSSQL_PASSWORD: sQrcHP!D5x
+      MSSQL_MASTER: master
+      MSSQL_DB: flaskdb
+      MSSQL_PORT: 1433
+      SECRET_KEY: sup3r-s3cr3t-k3y-923tw2ut78
+    ports:
+      - "5050:5000"
+    depends_on:
+      mssql:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:1.22.0
+    container_name: nginx
+    ports:
+      - "8181:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - flaskapp
+
